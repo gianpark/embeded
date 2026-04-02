@@ -1,0 +1,97 @@
+{
+  "name": "MySQL 샘플 워크플로우",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "5분마다 실행",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT u.name, u.email, COUNT(o.id) as order_count, SUM(o.amount) as total_amount FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id, u.name, u.email ORDER BY total_amount DESC",
+        "options": {}
+      },
+      "id": "mysql-query",
+      "name": "사용자별 주문 집계",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [460, 300],
+      "credentials": {
+        "mySql": {
+          "id": "mysql-cred",
+          "name": "MySQL appdb"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": {
+          "__rl": true,
+          "value": "logs",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "level": "info",
+            "message": "={{ '집계 완료: ' + $json.name + ' - 총 ' + $json.total_amount + '원' }}",
+            "source": "n8n-workflow"
+          }
+        },
+        "options": {}
+      },
+      "id": "mysql-insert",
+      "name": "결과 로그 저장",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [680, 300],
+      "credentials": {
+        "mySql": {
+          "id": "mysql-cred",
+          "name": "MySQL appdb"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "5분마다 실행": {
+      "main": [
+        [
+          {
+            "node": "사용자별 주문 집계",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "사용자별 주문 집계": {
+      "main": [
+        [
+          {
+            "node": "결과 로그 저장",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -1,0 +1,63 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: n8n_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: appdb
+      MYSQL_USER: ${MYSQL_USER:-n8nuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-n8npass}
+    ports:
+      - "${MYSQL_PORT:-3308}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - n8n_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpass}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n_app
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5679}:5678"
+    environment:
+      # n8n 내부 메타데이터 저장에 MySQL 사용
+      - DB_TYPE=mysqldb
+      - DB_MYSQLDB_HOST=mysql
+      - DB_MYSQLDB_PORT=3306
+      - DB_MYSQLDB_DATABASE=n8ndb
+      - DB_MYSQLDB_USER=root
+      - DB_MYSQLDB_PASSWORD=${MYSQL_ROOT_PASSWORD:-rootpass}
+      # n8n 기본 설정
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:${N8N_PORT:-5679}/
+      - GENERIC_TIMEZONE=Asia/Seoul
+      - N8N_LOG_LEVEL=info
+      # 보안 설정
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-change-this-secret-key-32chars!}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - n8n_network
+
+volumes:
+  mysql_data:
+    name: n8n_mysql_data
+  n8n_data:
+    name: n8n_app_data
+
+networks:
+  n8n_network:
+    driver: bridge
