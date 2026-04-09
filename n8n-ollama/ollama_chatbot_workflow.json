@@ -1,0 +1,270 @@
+{
+  "name": "🦙 Ollama Multi-Model Local Chatbot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "📥 Chat Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 400],
+      "webhookId": "ollama-chat-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 요청에서 데이터 추출 및 유효성 검사\nconst body = $input.first().json.body;\n\nconst prompt = body?.prompt || body?.message || '';\nconst model = body?.model || 'llama3.2';  // 기본 모델\nconst systemPrompt = body?.system_prompt || '당신은 도움이 되는 한국어 AI 어시스턴트입니다. 친절하고 정확하게 답변해주세요.';\nconst temperature = body?.temperature || 0.7;\nconst maxTokens = body?.max_tokens || 2000;\nconst conversationHistory = body?.history || [];\n\n// 지원 모델 목록\nconst supportedModels = {\n  'llama3.2': { name: 'LLaMA 3.2 (3B)', description: '빠른 응답, 일반 대화' },\n  'llama3.2:1b': { name: 'LLaMA 3.2 1B', description: '초경량, 빠른 응답' },\n  'llama3.1:8b': { name: 'LLaMA 3.1 (8B)', description: '균형잡힌 성능' },\n  'codellama': { name: 'Code LLaMA', description: '코드 생성 특화' },\n  'mistral': { name: 'Mistral 7B', description: '고품질 텍스트 생성' }\n};\n\nif (!prompt || prompt.trim() === '') {\n  throw new Error('prompt 또는 message 필드가 필요합니다.');\n}\n\n// 모델 유효성 검사\nconst validModel = supportedModels[model] ? model : 'llama3.2';\n\n// 대화 히스토리 포맷팅\nlet formattedHistory = '';\nif (conversationHistory.length > 0) {\n  formattedHistory = conversationHistory\n    .map(h => `${h.role === 'user' ? '사용자' : 'AI'}: ${h.content}`)\n    .join('\\n');\n  formattedHistory = '\\n\\n이전 대화:\\n' + formattedHistory + '\\n';\n}\n\nreturn [{\n  json: {\n    prompt: prompt.trim(),\n    model: validModel,\n    modelInfo: supportedModels[validModel],\n    systemPrompt,\n    temperature,\n    maxTokens,\n    formattedHistory,\n    conversationHistory,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "validate-input",
+      "name": "🔍 입력 검증 & 파싱",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host-gateway:11434/api/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"{{ $json.model }}\",\n  \"prompt\": \"{{ $json.systemPrompt }}\\n{{ $json.formattedHistory }}\\n사용자: {{ $json.prompt }}\\nAI:\",\n  \"stream\": false,\n  \"options\": {\n    \"temperature\": {{ $json.temperature }},\n    \"num_predict\": {{ $json.maxTokens }},\n    \"top_k\": 40,\n    \"top_p\": 0.9,\n    \"repeat_penalty\": 1.1\n  }\n}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "ollama-generate",
+      "name": "🦙 Ollama API 호출",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host-gateway:11434/api/chat",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"{{ $('🔍 입력 검증 & 파싱').item.json.model }}\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"{{ $('🔍 입력 검증 & 파싱').item.json.systemPrompt }}\"\n    },\n    {{ $('🔍 입력 검증 & 파싱').item.json.conversationHistory.map(h => JSON.stringify({role: h.role, content: h.content})).join(',') }},\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $('🔍 입력 검증 & 파싱').item.json.prompt }}\"\n    }\n  ],\n  \"stream\": false,\n  \"options\": {\n    \"temperature\": {{ $('🔍 입력 검증 & 파싱').item.json.temperature }},\n    \"num_predict\": {{ $('🔍 입력 검증 & 파싱').item.json.maxTokens }}\n  }\n}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "ollama-chat",
+      "name": "💬 Ollama Chat API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-history",
+              "leftValue": "={{ $json.conversationHistory.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "route-api",
+      "name": "🔀 API 라우팅",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 600]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate API 응답 처리\nconst ollamaResponse = $('🦙 Ollama API 호출').item.json;\nconst inputData = $('🔍 입력 검증 & 파싱').item.json;\n\nconst responseText = ollamaResponse.response || '응답을 받지 못했습니다.';\n\n// 새 히스토리 구성\nconst updatedHistory = [\n  ...inputData.conversationHistory,\n  { role: 'user', content: inputData.prompt },\n  { role: 'assistant', content: responseText }\n];\n\n// 히스토리 최대 10턴 유지\nconst trimmedHistory = updatedHistory.slice(-20);\n\nreturn [{\n  json: {\n    success: true,\n    response: responseText,\n    model: inputData.model,\n    model_info: inputData.modelInfo,\n    api_type: 'generate',\n    prompt_tokens: ollamaResponse.prompt_eval_count || 0,\n    completion_tokens: ollamaResponse.eval_count || 0,\n    total_duration_ms: Math.round((ollamaResponse.total_duration || 0) / 1000000),\n    history: trimmedHistory,\n    timestamp: inputData.timestamp\n  }\n}];"
+      },
+      "id": "process-generate",
+      "name": "⚙️ Generate 응답 처리",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Chat API 응답 처리\nconst ollamaResponse = $('💬 Ollama Chat API').item.json;\nconst inputData = $('🔍 입력 검증 & 파싱').item.json;\n\nconst responseText = ollamaResponse.message?.content || '응답을 받지 못했습니다.';\n\n// 새 히스토리 구성\nconst updatedHistory = [\n  ...inputData.conversationHistory,\n  { role: 'user', content: inputData.prompt },\n  { role: 'assistant', content: responseText }\n];\n\n// 히스토리 최대 10턴 유지\nconst trimmedHistory = updatedHistory.slice(-20);\n\nreturn [{\n  json: {\n    success: true,\n    response: responseText,\n    model: inputData.model,\n    model_info: inputData.modelInfo,\n    api_type: 'chat',\n    prompt_tokens: ollamaResponse.prompt_eval_count || 0,\n    completion_tokens: ollamaResponse.eval_count || 0,\n    total_duration_ms: Math.round((ollamaResponse.total_duration || 0) / 1000000),\n    history: trimmedHistory,\n    timestamp: inputData.timestamp\n  }\n}];"
+      },
+      "id": "process-chat",
+      "name": "⚙️ Chat 응답 처리",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 500]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "output": "input1"
+      },
+      "id": "merge-responses",
+      "name": "🔗 응답 병합",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1200, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "send-response",
+      "name": "📤 응답 전송",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1440, 400]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "models",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "models-webhook",
+      "name": "📋 모델 목록 Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 700],
+      "webhookId": "ollama-models-webhook"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host-gateway:11434/api/tags",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "get-models",
+      "name": "📋 Ollama 모델 조회",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 700]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ollamaModels = $input.first().json.models || [];\n\nconst formattedModels = ollamaModels.map(m => ({\n  name: m.name,\n  size_gb: (m.size / 1024 / 1024 / 1024).toFixed(2),\n  modified: m.modified_at,\n  family: m.details?.family || 'unknown'\n}));\n\nreturn [{\n  json: {\n    success: true,\n    available_models: formattedModels,\n    count: formattedModels.length,\n    recommended: [\n      { model: 'llama3.2', use_case: '일반 대화 (빠름)' },\n      { model: 'llama3.1:8b', use_case: '복잡한 추론' },\n      { model: 'codellama', use_case: '코드 생성' },\n      { model: 'mistral', use_case: '고품질 텍스트' }\n    ]\n  }\n}];"
+      },
+      "id": "format-models",
+      "name": "📊 모델 목록 포맷",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 700]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "send-models",
+      "name": "📤 모델 목록 전송",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [960, 700]
+    }
+  ],
+  "connections": {
+    "📥 Chat Webhook": {
+      "main": [[{ "node": "🔍 입력 검증 & 파싱", "type": "main", "index": 0 }]]
+    },
+    "🔍 입력 검증 & 파싱": {
+      "main": [[{ "node": "🔀 API 라우팅", "type": "main", "index": 0 }]]
+    },
+    "🔀 API 라우팅": {
+      "main": [
+        [{ "node": "💬 Ollama Chat API", "type": "main", "index": 0 }],
+        [{ "node": "🦙 Ollama API 호출", "type": "main", "index": 0 }]
+      ]
+    },
+    "🦙 Ollama API 호출": {
+      "main": [[{ "node": "⚙️ Generate 응답 처리", "type": "main", "index": 0 }]]
+    },
+    "💬 Ollama Chat API": {
+      "main": [[{ "node": "⚙️ Chat 응답 처리", "type": "main", "index": 0 }]]
+    },
+    "⚙️ Generate 응답 처리": {
+      "main": [[{ "node": "🔗 응답 병합", "type": "main", "index": 0 }]]
+    },
+    "⚙️ Chat 응답 처리": {
+      "main": [[{ "node": "🔗 응답 병합", "type": "main", "index": 1 }]]
+    },
+    "🔗 응답 병합": {
+      "main": [[{ "node": "📤 응답 전송", "type": "main", "index": 0 }]]
+    },
+    "📋 모델 목록 Webhook": {
+      "main": [[{ "node": "📋 Ollama 모델 조회", "type": "main", "index": 0 }]]
+    },
+    "📋 Ollama 모델 조회": {
+      "main": [[{ "node": "📊 모델 목록 포맷", "type": "main", "index": 0 }]]
+    },
+    "📊 모델 목록 포맷": {
+      "main": [[{ "node": "📤 모델 목록 전송", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": ["ollama", "chatbot", "llama", "local-ai"],
+  "triggerCount": 2,
+  "updatedAt": "2026-04-09T00:00:00.000Z",
+  "versionId": "1"
+}
