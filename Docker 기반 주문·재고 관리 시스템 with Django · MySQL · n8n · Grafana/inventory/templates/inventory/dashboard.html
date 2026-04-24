@@ -1,0 +1,47 @@
+{% extends 'inventory/base.html' %}
+{% block title %}대시보드{% endblock %}
+{% block content %}
+<div class="page-title">대시보드</div>
+<div class="page-sub">재고 및 주문 현황</div>
+<div class="stats">
+  <div class="stat"><div class="stat-label">전체 상품</div><div class="stat-value blue">{{ total_products }}</div></div>
+  <div class="stat"><div class="stat-label">재고 부족</div><div class="stat-value yellow">{{ low_stock }}</div></div>
+  <div class="stat"><div class="stat-label">품절</div><div class="stat-value red">{{ out_stock }}</div></div>
+  <div class="stat"><div class="stat-label">전체 주문</div><div class="stat-value green">{{ total_orders }}</div></div>
+  <div class="stat"><div class="stat-label">처리 대기</div><div class="stat-value yellow">{{ pending_orders }}</div></div>
+  <div class="stat"><div class="stat-label">오늘 주문</div><div class="stat-value blue">{{ today_orders }}</div></div>
+</div>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title">최근 주문</div>
+    <table><thead><tr><th>주문#</th><th>고객</th><th>금액</th><th>상태</th></tr></thead>
+    <tbody>
+    {% for o in recent_orders %}
+    <tr>
+      <td>#{{ o.pk }}</td><td>{{ o.customer_name }}</td><td>{{ o.total_price }}원</td>
+      <td>{% if o.status == 'pending' %}<span class="badge b-yellow">대기</span>
+      {% elif o.status == 'completed' %}<span class="badge b-green">완료</span>
+      {% elif o.status == 'shipping' %}<span class="badge b-blue">배송중</span>
+      {% elif o.status == 'confirmed' %}<span class="badge b-blue">확인</span>
+      {% else %}<span class="badge b-gray">취소</span>{% endif %}</td>
+    </tr>
+    {% empty %}<tr><td colspan="4" class="text-muted">주문 없음</td></tr>{% endfor %}
+    </tbody></table>
+    <div class="mt-2"><a href="{% url 'order_list' %}" class="btn btn-ghost btn-sm">전체 보기 →</a></div>
+  </div>
+  <div class="card">
+    <div class="card-title">⚠ 재고 부족</div>
+    <table><thead><tr><th>상품명</th><th>재고</th><th>단가</th></tr></thead>
+    <tbody>
+    {% for p in low_products %}
+    <tr>
+      <td>{{ p.name }}</td>
+      <td>{% if p.stock == 0 %}<span class="badge b-red">품절</span>{% else %}<span class="badge b-yellow">{{ p.stock }}개</span>{% endif %}</td>
+      <td>{{ p.price }}원</td>
+    </tr>
+    {% empty %}<tr><td colspan="3" class="text-muted">부족 상품 없음</td></tr>{% endfor %}
+    </tbody></table>
+    <div class="mt-2"><a href="{% url 'product_list' %}" class="btn btn-ghost btn-sm">전체 보기 →</a></div>
+  </div>
+</div>
+{% endblock %}
